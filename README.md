@@ -23,4 +23,20 @@ cd ~/Desktop/multi_camera_datacollect
 pip install -r requirements.txt
 ```
 
+## Orbbec USB 权限规则
+
+项目根目录下提供了 `99-orbbec.rules`。首次使用或更换系统后，先把规则复制到系统 udev 目录，并重新加载规则：
+
+```bash
+sudo cp 99-orbbec.rules /etc/udev/rules.d/99-orbbec.rules
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+```
+
+执行完成后，重新插拔 Orbbec 相机，让 udev 规则生效。规则内容为：
+
+```udev
+SUBSYSTEM=="usb", ATTR{idVendor}=="2bc5", MODE:="0666", TAG+="uaccess"
+```
+
 录制数据默认保存在 `record/` 下，每次录制会新建带时间戳的文件夹，并写入 `.bag`、相机内参 JSON；勾选点云时会额外写入 `point_clouds/`。
