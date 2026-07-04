@@ -1,0 +1,26 @@
+# Multi Camera Data Collect
+
+独立版 Orbbec 多相机采集页面，从上位机 `camera page` 拆出。
+
+## 目录
+
+- `main.py`: 独立启动入口。
+- `app/`: UI、Qt worker、Orbbec 子进程、录制工具。
+- `config/app_settings.json`: 默认数据保存路径配置，默认写入项目内 `record/`。
+- `config/multi_device_sync_config.json`: 三相机同步配置，填入真实相机序列号后可严格按 SN 匹配。
+- `record/`: 默认录制输出目录。
+
+## 运行
+
+```bash
+cd ~/Desktop/multi_camera_datacollect
+./run_multi_camera_datacollect.sh
+```
+
+如当前环境未安装依赖：
+
+```bash
+pip install -r requirements.txt
+```
+
+录制数据默认保存在 `record/` 下，每次录制会新建带时间戳的文件夹，并写入 `.bag`、相机内参 JSON；勾选点云时会额外写入 `point_clouds/`。
