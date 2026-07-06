@@ -13,6 +13,7 @@ MIN_DEPTH_MM = 20
 MAX_DEPTH_MM = 5000
 RECORDING_SEGMENT_SECONDS = 120.0
 RECORDING_SEGMENT_ROTATE_GRACE_SECONDS = 1.0
+ENABLE_HARDWARE_D2C_ALIGN = False
 
 
 class SegmentedBagRecorder:
@@ -448,11 +449,10 @@ def _start_rgbd_pipeline_with_hw_align_fallback(
     enable_imu: bool = True,
     status_callback=None,
 ) -> tuple[str, bool, str]:
-    """Start RGB-D streams with hardware D2C preferred.
+    """Start RGB-D streams with raw depth by default.
 
-    The returned depth stream is hardware-aligned when a matching D2C profile
-    can be enabled and started. If that path fails, raw depth streams are used
-    so preview/recording can still run.
+    Hardware D2C profile probing is disabled by default because unsupported
+    devices can fail or stall while querying D2C profiles.
     """
 
     attempts: list[tuple[object, str, bool, str]] = []
@@ -473,24 +473,27 @@ def _start_rgbd_pipeline_with_hw_align_fallback(
             )
         )
 
-    for with_imu in ([True, False] if enable_imu else [False]):
-        config, imu_enabled, reason = _build_hw_aligned_rgbd_config(
-            pipeline,
-            Config=Config,
-            OBSensorType=OBSensorType,
-            OBFormat=OBFormat,
-            OBAlignMode=OBAlignMode,
-            enable_imu=with_imu,
-        )
-        if config is not None:
-            add_attempt(
-                config,
-                hardware_align=True,
-                imu_enabled=imu_enabled,
-                align_status="hardware D2C enabled",
+    if ENABLE_HARDWARE_D2C_ALIGN:
+        for with_imu in ([True, False] if enable_imu else [False]):
+            config, imu_enabled, reason = _build_hw_aligned_rgbd_config(
+                pipeline,
+                Config=Config,
+                OBSensorType=OBSensorType,
+                OBFormat=OBFormat,
+                OBAlignMode=OBAlignMode,
+                enable_imu=with_imu,
             )
-        elif reason and not hardware_align_reason:
-            hardware_align_reason = reason
+            if config is not None:
+                add_attempt(
+                    config,
+                    hardware_align=True,
+                    imu_enabled=imu_enabled,
+                    align_status="hardware D2C enabled",
+                )
+            elif reason and not hardware_align_reason:
+                hardware_align_reason = reason
+    else:
+        hardware_align_reason = "hardware D2C profile disabled"
 
     for with_imu in ([True, False] if enable_imu else [False]):
         config, imu_enabled, reason = _build_raw_rgbd_config(
@@ -644,7 +647,7 @@ def _process_depth_frame(frame, depth_mode: str, cv2, np):
 
 
 def _encode_jpeg(image, cv2) -> bytes | None:
-    ok, encoded = cv2.imencode(".jpg", image, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
+    ok, encoded = cv2.imencode(".jpg", image, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
     if not ok:
         return None
     return encoded.tobytes()

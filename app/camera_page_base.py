@@ -480,7 +480,7 @@ class MultiCameraSyncWorker(QThread):
     def run(self) -> None:
         context = mp.get_context("spawn")
         self._event_queue = context.Queue(maxsize=128)
-        self._frame_queue = context.Queue(maxsize=8)
+        self._frame_queue = context.Queue(maxsize=2)
         self._command_queue = context.Queue(maxsize=16)
         self._process = context.Process(
             target=run_orbbec_multi_camera_sync_process,

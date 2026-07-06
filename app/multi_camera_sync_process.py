@@ -451,7 +451,7 @@ def _default_sync_config(index: int) -> dict:
 
 
 def _encode_jpeg(image, cv2) -> bytes | None:
-    ok, encoded = cv2.imencode(".jpg", image, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
+    ok, encoded = cv2.imencode(".jpg", image, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
     if not ok:
         return None
     return encoded.tobytes()
