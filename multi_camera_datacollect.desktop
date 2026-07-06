@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Multi Camera Data Collect
+Name[zh_CN]=多相机采集
+Comment=Launch Orbbec multi-camera data collection
+Exec=/home/workspace/multi_camera_datacollect/run_multi_camera_datacollect.sh
+Path=/home/workspace/multi_camera_datacollect
+Icon=camera-photo
+Terminal=false
+Categories=Utility;Science;
+StartupNotify=true

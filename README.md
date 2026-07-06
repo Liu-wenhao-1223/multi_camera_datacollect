@@ -9,12 +9,30 @@
 - `config/app_settings.json`: 默认数据保存路径配置，默认写入项目内 `record/`。
 - `config/multi_device_sync_config.json`: 三相机同步配置，填入真实相机序列号后可严格按 SN 匹配。
 - `record/`: 默认录制输出目录。
+- `multi_camera_datacollect.desktop`: 快捷启动按钮，默认启动路径为 `/home/workspace/multi_camera_datacollect`。
 
 ## 运行
 
 ```bash
-cd ~/Desktop/multi_camera_datacollect
+cd /home/workspace/multi_camera_datacollect
 ./run_multi_camera_datacollect.sh
+```
+
+## 快捷启动
+
+项目根目录下提供了 `multi_camera_datacollect.desktop`，适合把整个目录放到 `/home/workspace/` 后双击启动。
+
+启动器路径已配置为：
+
+```ini
+Exec=/home/workspace/multi_camera_datacollect/run_multi_camera_datacollect.sh
+Path=/home/workspace/multi_camera_datacollect
+```
+
+如果系统提示不信任该启动器，先右键选择允许启动，或执行：
+
+```bash
+chmod +x /home/workspace/multi_camera_datacollect/multi_camera_datacollect.desktop
 ```
 
 如当前环境未安装依赖：
