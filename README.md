@@ -20,12 +20,12 @@ cd ~/workspace/multi_camera_datacollect
 
 ## 快捷启动
 
-项目根目录下提供了 `multi_camera_datacollect.desktop`。这个文件适合复制到桌面作为启动图标使用，启动时会执行当前用户 Home 目录下的 `~/workspace/multi_camera_datacollect/run_multi_camera_datacollect.sh`。
+项目根目录下提供了 `multi_camera_datacollect.desktop`。这个文件适合复制到桌面作为启动图标使用，启动时会用 Python 获取当前用户的真实 Home 目录，并执行 `~/workspace/multi_camera_datacollect/run_multi_camera_datacollect.sh`。
 
 启动器执行逻辑为：
 
 ```ini
-Exec=... ~/workspace/multi_camera_datacollect/run_multi_camera_datacollect.sh
+Exec=... Path.home()/workspace/multi_camera_datacollect/run_multi_camera_datacollect.sh
 ```
 
 如果双击后没有反应，查看桌面上的 `multi_camera_datacollect_launch.log`，里面会记录实际查找的目录和启动错误。
