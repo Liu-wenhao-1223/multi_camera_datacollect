@@ -43,7 +43,7 @@ pip install -r requirements.txt
 
 ## 多相机同步配置
 
-`config/multi_device_sync_config.json` 中可以填入相机序列号来固定主从关系。程序会按配置文件中的顺序优先匹配真实 SN，因此 PRIMARY 相机会成为界面里的 Camera 1，不再依赖不同机器上的 USB 枚举顺序。
+`config/multi_device_sync_config.json` 中可以填入相机序列号来固定主从关系。程序会保持 SDK/USB 枚举顺序打开相机，但会按真实 SN 给对应物理相机应用 PRIMARY/SECONDARY 配置，因此不再依赖不同机器上的 USB 枚举顺序来决定谁是主相机。
 
 同步线连接到触发输出的那台相机应配置为：
 
@@ -59,7 +59,7 @@ pip install -r requirements.txt
 "trigger_out_enable": false
 ```
 
-如果某个 SN 没匹配到，程序会先使用已经匹配的相机，再用 USB 顺序补齐剩余相机，并在状态栏显示实际使用的 `usb_index`、SN、mode 和 trigger_out。
+如果某个 SN 没匹配到，程序会保持 USB 顺序补齐剩余相机，并在状态栏显示实际使用的 `usb_index`、SN、mode 和 trigger_out。若已匹配到 PRIMARY，相机中未匹配到 SN 的设备会默认作为 SECONDARY，避免出现两个 PRIMARY。
 
 ## Orbbec USB 权限规则
 

@@ -173,7 +173,7 @@ def run_orbbec_multi_camera_sync_process(
             "status",
             -1,
             "同步配置: "
-            f"{'按序列号优先排序' if _uses_serial_config(sync_config_entries) else '使用默认USB顺序'}; "
+            f"{'按序列号匹配角色' if _uses_serial_config(sync_config_entries) else '使用默认USB顺序'}; "
             f"config={Path(sync_config_path)}; "
             f"serials={_serials_text(sync_config_entries)}",
         )
@@ -357,54 +357,51 @@ def _build_sync_device_plan(devices, camera_count: int, config_entries: list[dic
             }
         )
 
-    selected: list[dict] = []
-    used_usb_indexes: set[int] = set()
     real_serial_entries = [
         entry
         for entry in config_entries
         if not _is_placeholder_serial(str(entry.get("serial", "")))
     ]
-    if real_serial_entries:
-        devices_by_serial = {}
-        for connected in connected_devices:
-            serial_key = _serial_key(str(connected.get("serial", "")))
-            if serial_key and serial_key not in devices_by_serial:
-                devices_by_serial[serial_key] = connected
+    config_by_serial = {
+        _serial_key(str(entry.get("serial", ""))): entry.get("config", {})
+        for entry in real_serial_entries
+    }
+    has_configured_primary = any(
+        _config_mode(entry.get("config", {})) == "PRIMARY"
+        for entry in real_serial_entries
+    )
 
-        for entry in real_serial_entries:
-            if len(selected) >= camera_count:
-                break
-            matched_device = devices_by_serial.get(_serial_key(str(entry.get("serial", ""))))
-            if matched_device is None:
-                continue
-            usb_index = int(matched_device["usb_index"])
-            if usb_index in used_usb_indexes:
-                continue
-            planned = dict(matched_device)
-            planned["config"] = entry.get("config", {})
-            planned["source"] = "serial"
-            selected.append(planned)
-            used_usb_indexes.add(usb_index)
-
-    for connected in connected_devices:
-        if len(selected) >= camera_count:
-            break
-        usb_index = int(connected["usb_index"])
-        if usb_index in used_usb_indexes:
-            continue
-        logical_index = len(selected)
+    plan: list[dict] = []
+    matched_primary = False
+    for logical_index, connected in enumerate(connected_devices[:camera_count]):
         planned = dict(connected)
-        fallback_config = _placeholder_config_for_index(config_entries, logical_index)
-        if fallback_config is not None:
-            planned["config"] = fallback_config
-            planned["source"] = "config-index"
+        serial_config = config_by_serial.get(_serial_key(str(connected.get("serial", ""))))
+        if isinstance(serial_config, dict):
+            planned["config"] = serial_config
+            planned["source"] = "serial"
+            if _config_mode(serial_config) == "PRIMARY":
+                matched_primary = True
         else:
-            planned["config"] = None
-            planned["source"] = "default-usb-index"
-        selected.append(planned)
-        used_usb_indexes.add(usb_index)
+            fallback_config = _placeholder_config_for_index(config_entries, logical_index)
+            if fallback_config is not None and not real_serial_entries:
+                planned["config"] = fallback_config
+                planned["source"] = "config-index"
+            else:
+                planned["config"] = None
+                planned["source"] = "default-usb-index"
+        plan.append(planned)
 
-    return selected[:camera_count]
+    for logical_index, planned in enumerate(plan):
+        if isinstance(planned.get("config"), dict):
+            continue
+        if has_configured_primary and matched_primary:
+            planned["config"] = _secondary_sync_config()
+            planned["source"] = "default-secondary"
+        else:
+            planned["config"] = _default_sync_config(logical_index)
+            planned["source"] = "default-usb-index"
+
+    return plan[:camera_count]
 
 
 def _apply_sync_config(
@@ -497,6 +494,24 @@ def _placeholder_config_for_index(config_entries: list[dict], index: int) -> dic
         return None
     config = entry.get("config", {})
     return config if isinstance(config, dict) else None
+
+
+def _config_mode(config_json) -> str:
+    if not isinstance(config_json, dict):
+        return ""
+    return str(config_json.get("mode", "")).strip().upper()
+
+
+def _secondary_sync_config() -> dict:
+    return {
+        "mode": "SECONDARY",
+        "depth_delay_us": 0,
+        "color_delay_us": 0,
+        "trigger_to_image_delay_us": 0,
+        "trigger_out_enable": False,
+        "trigger_out_delay_us": 0,
+        "frames_per_trigger": 1,
+    }
 
 
 def _serials_text(config_entries: list[dict]) -> str:
