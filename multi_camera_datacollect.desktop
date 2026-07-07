@@ -3,7 +3,7 @@ Type=Application
 Name=Multi Camera Data Collect
 Name[zh_CN]=多相机采集
 Comment=Launch Orbbec multi-camera data collection
-Exec=/usr/bin/env python3 -c "import os,subprocess; d=os.path.join(os.path.expanduser(\"~\"),\"workspace\",\"multi_camera_datacollect\"); subprocess.Popen([os.path.join(d,\"run_multi_camera_datacollect.sh\")], cwd=d)"
+Exec=/bin/bash -lc "app_dir=\"\\$HOME/workspace/multi_camera_datacollect\"; log=\"\\$HOME/Desktop/multi_camera_datacollect_launch.log\"; { date; echo \"app_dir=\\$app_dir\"; if [[ ! -x \"\\$app_dir/run_multi_camera_datacollect.sh\" ]]; then echo \"missing executable: \\$app_dir/run_multi_camera_datacollect.sh\"; exit 1; fi; cd \"\\$app_dir\" && exec ./run_multi_camera_datacollect.sh; } >>\"\\$log\" 2>&1"
 Icon=camera-photo
 Terminal=false
 Categories=Utility;Science;
