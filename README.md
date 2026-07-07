@@ -41,6 +41,26 @@ gio set ~/Desktop/multi_camera_datacollect.desktop metadata::trusted true
 pip install -r requirements.txt
 ```
 
+## 多相机同步配置
+
+`config/multi_device_sync_config.json` 中可以填入相机序列号来固定主从关系。程序会保持 SDK/USB 枚举顺序打开相机，但会按真实 SN 给对应物理相机应用 PRIMARY/SECONDARY 配置，因此不再依赖不同机器上的 USB 枚举顺序来决定谁是主相机。
+
+同步线连接到触发输出的那台相机应配置为：
+
+```json
+"mode": "PRIMARY",
+"trigger_out_enable": true
+```
+
+其他接收触发的相机应配置为：
+
+```json
+"mode": "SECONDARY",
+"trigger_out_enable": false
+```
+
+如果某个 SN 没匹配到，程序会保持 USB 顺序补齐剩余相机，并在状态栏显示实际使用的 `usb_index`、SN、mode 和 trigger_out。若已匹配到 PRIMARY，相机中未匹配到 SN 的设备会默认作为 SECONDARY，避免出现两个 PRIMARY。
+
 ## Orbbec USB 权限规则
 
 项目根目录下提供了 `99-orbbec.rules`。首次使用或更换系统后，先把规则复制到系统 udev 目录，并重新加载规则：

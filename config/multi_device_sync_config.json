@@ -1,7 +1,7 @@
 {
   "devices": [
     {
-      "serial_number": "CAMERA_1_SERIAL",
+      "serial_number": "CL89562000L",
       "config": {
         "mode": "PRIMARY",
         "depth_delay_us": 0,
@@ -13,13 +13,13 @@
       }
     },
     {
-      "serial_number": "CAMERA_2_SERIAL",
+      "serial_number": "CL8L56300XS",
       "config": {
         "mode": "SECONDARY",
         "depth_delay_us": 0,
         "color_delay_us": 0,
         "trigger_to_image_delay_us": 0,
-        "trigger_out_enable": true,
+        "trigger_out_enable": false,
         "trigger_out_delay_us": 0,
         "frames_per_trigger": 1
       }
@@ -31,7 +31,7 @@
         "depth_delay_us": 0,
         "color_delay_us": 0,
         "trigger_to_image_delay_us": 0,
-        "trigger_out_enable": true,
+        "trigger_out_enable": false,
         "trigger_out_delay_us": 0,
         "frames_per_trigger": 1
       }
