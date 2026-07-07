@@ -14,25 +14,25 @@
 ## 运行
 
 ```bash
-cd /home/workspace/multi_camera_datacollect
+cd ~/workspace/multi_camera_datacollect
 ./run_multi_camera_datacollect.sh
 ```
 
 ## 快捷启动
 
-项目根目录下提供了 `multi_camera_datacollect.desktop`，适合把整个目录放到 `/home/workspace/` 后双击启动。
+项目根目录下提供了 `multi_camera_datacollect.desktop`。这个文件适合复制到桌面作为启动图标使用，启动时会执行当前用户 Home 目录下的 `~/workspace/multi_camera_datacollect/run_multi_camera_datacollect.sh`。
 
-启动器路径已配置为：
+启动器执行逻辑为：
 
 ```ini
-Exec=/home/workspace/multi_camera_datacollect/run_multi_camera_datacollect.sh
-Path=/home/workspace/multi_camera_datacollect
+Exec=... ~/workspace/multi_camera_datacollect/run_multi_camera_datacollect.sh
 ```
 
 如果系统提示不信任该启动器，先右键选择允许启动，或执行：
 
 ```bash
-chmod +x /home/workspace/multi_camera_datacollect/multi_camera_datacollect.desktop
+chmod +x ~/Desktop/multi_camera_datacollect.desktop
+gio set ~/Desktop/multi_camera_datacollect.desktop metadata::trusted true
 ```
 
 如当前环境未安装依赖：
