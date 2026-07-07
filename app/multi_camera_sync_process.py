@@ -166,39 +166,37 @@ def run_orbbec_multi_camera_sync_process(
                 f"检测到 {device_count} 台 Orbbec 相机，本次按 {camera_count} 路同步连接。",
             )
 
-        sync_config_entries = _load_sync_config(Path(sync_config_path))
-        device_plan = _build_sync_device_plan(devices, camera_count, sync_config_entries)
-        camera_count = len(device_plan)
+        sync_config_by_serial = _load_sync_config(Path(sync_config_path))
+        strict_serial_config = _uses_strict_serial_config(sync_config_by_serial)
         emit(
             "status",
             -1,
             "同步配置: "
-            f"{'按序列号匹配角色' if _uses_serial_config(sync_config_entries) else '使用默认USB顺序'}; "
+            f"{'按序列号严格匹配' if strict_serial_config else '使用默认USB顺序'}; "
             f"config={Path(sync_config_path)}; "
-            f"serials={_serials_text(sync_config_entries)}",
+            f"serials={_serials_text(sync_config_by_serial)}",
         )
-        for index, planned_device in enumerate(device_plan):
-            device = planned_device["device"]
-            usb_index = int(planned_device["usb_index"])
-            serial = str(planned_device["serial"])
-            name = str(planned_device["name"])
-            connection = str(planned_device["connection"])
+        for index in range(camera_count):
+            device = devices.get_device_by_index(index)
+            info = device.get_device_info()
+            serial = _normalize_serial(info.get_serial_number())
+            name = info.get_name()
+            connection = info.get_connection_type()
             try:
                 applied_sync_config = _apply_sync_config(
                     device,
                     serial,
                     index,
-                    planned_device.get("config"),
-                    source=str(planned_device.get("source", "default-usb-index")),
+                    sync_config_by_serial,
+                    strict_serial_config=strict_serial_config,
                 )
             except Exception as exc:
                 emit(
                     "error",
                     index,
                     f"Camera {index + 1} 设置多设备同步失败: "
-                    f"USB index={usb_index}, SN={serial or '-'}, name={name}, "
-                    f"connection={connection}, config_serials={_serials_text(sync_config_entries)}, "
-                    f"error={exc}",
+                    f"SN={serial or '-'}, name={name}, connection={connection}, "
+                    f"config_serials={_serials_text(sync_config_by_serial)}, error={exc}",
                 )
                 return
             emit(
@@ -206,7 +204,6 @@ def run_orbbec_multi_camera_sync_process(
                 index,
                 "Sync config applied: "
                 f"source={applied_sync_config['source']}, "
-                f"usb_index={usb_index}, "
                 f"SN={serial or '-'}, "
                 f"mode={applied_sync_config['mode']}, "
                 f"trigger_out={applied_sync_config['trigger_out_enable']}, "
@@ -308,128 +305,49 @@ def reset_orbbec_devices_to_standalone(event_queue=None, sync_config_path: str |
                 pass
 
 
-def _load_sync_config(path: Path) -> list[dict]:
+def _load_sync_config(path: Path) -> dict[str, dict]:
     if not path.exists():
-        return []
+        return {}
     with path.open("r", encoding="utf-8") as fp:
         data = json.load(fp)
     devices = data.get("devices", []) if isinstance(data, dict) else []
-    entries = []
-    for index, device in enumerate(devices):
-        if not isinstance(device, dict):
-            continue
+    config_by_serial = {}
+    for device in devices:
         serial = _normalize_serial(device.get("serial_number"))
-        config = device.get("config", {})
-        entries.append(
-            {
-                "index": index,
-                "serial": serial,
-                "config": config if isinstance(config, dict) else {},
-            }
-        )
-    return entries
-
-
-def _build_sync_device_plan(devices, camera_count: int, config_entries: list[dict]) -> list[dict]:
-    connected_devices = []
-    for usb_index in range(devices.get_count()):
-        device = devices.get_device_by_index(usb_index)
-        info = device.get_device_info()
-        try:
-            serial = _normalize_serial(info.get_serial_number())
-        except Exception:
-            serial = ""
-        try:
-            name = info.get_name()
-        except Exception:
-            name = ""
-        try:
-            connection = info.get_connection_type()
-        except Exception:
-            connection = ""
-        connected_devices.append(
-            {
-                "device": device,
-                "usb_index": usb_index,
-                "serial": serial,
-                "name": name,
-                "connection": connection,
-            }
-        )
-
-    real_serial_entries = [
-        entry
-        for entry in config_entries
-        if not _is_placeholder_serial(str(entry.get("serial", "")))
-    ]
-    config_by_serial = {
-        _serial_key(str(entry.get("serial", ""))): entry.get("config", {})
-        for entry in real_serial_entries
-    }
-    has_configured_primary = any(
-        _config_mode(entry.get("config", {})) == "PRIMARY"
-        for entry in real_serial_entries
-    )
-
-    plan: list[dict] = []
-    matched_primary = False
-    for logical_index, connected in enumerate(connected_devices[:camera_count]):
-        planned = dict(connected)
-        serial_config = config_by_serial.get(_serial_key(str(connected.get("serial", ""))))
-        if isinstance(serial_config, dict):
-            planned["config"] = serial_config
-            planned["source"] = "serial"
-            if _config_mode(serial_config) == "PRIMARY":
-                matched_primary = True
-        else:
-            fallback_config = _placeholder_config_for_index(config_entries, logical_index)
-            if fallback_config is not None and not real_serial_entries:
-                planned["config"] = fallback_config
-                planned["source"] = "config-index"
-            else:
-                planned["config"] = None
-                planned["source"] = "default-usb-index"
-        plan.append(planned)
-
-    for logical_index, planned in enumerate(plan):
-        if isinstance(planned.get("config"), dict):
+        if not serial:
             continue
-        if has_configured_primary and matched_primary:
-            planned["config"] = _secondary_sync_config()
-            planned["source"] = "default-secondary"
-        else:
-            planned["config"] = _default_sync_config(logical_index)
-            planned["source"] = "default-usb-index"
-
-    return plan[:camera_count]
+        config_by_serial[serial] = device.get("config", {})
+    return config_by_serial
 
 
 def _apply_sync_config(
     device,
     serial: str,
     index: int,
-    config_json: dict | None,
+    config_by_serial: dict[str, dict],
     *,
-    source: str = "default-usb-index",
+    strict_serial_config: bool = False,
 ) -> dict[str, object]:
     from pyorbbecsdk import OBMultiDeviceSyncMode
 
     serial = _normalize_serial(serial)
-    if not isinstance(config_json, dict):
+    config_json = config_by_serial.get(serial)
+    source = "serial"
+    if config_json is None:
+        if strict_serial_config:
+            raise RuntimeError(
+                f"未在 multi_device_sync_config.json 中找到当前相机 SN={serial or '-'}。"
+                f"配置中的 SN: {_serials_text(config_by_serial)}"
+            )
         config_json = _default_sync_config(index)
         source = "default-usb-index"
 
-    default_config = _default_sync_config(index)
-    mode = str(config_json.get("mode", default_config["mode"])).strip().upper()
+    mode = str(config_json.get("mode", "SECONDARY")).strip().upper()
     color_delay_us = int(config_json.get("color_delay_us", 0))
     depth_delay_us = int(config_json.get("depth_delay_us", 0))
-    trigger_to_image_delay_us = int(config_json.get("trigger_to_image_delay_us", 0))
-    trigger_out_default = _default_trigger_out_enable(mode, index)
     trigger_out_enable = _bool_from_config(
-        config_json.get("trigger_out_enable", trigger_out_default)
+        config_json.get("trigger_out_enable", index == 0)
     )
-    if not _sync_mode_allows_trigger_out(mode):
-        trigger_out_enable = False
     trigger_out_delay_us = int(config_json.get("trigger_out_delay_us", 0))
     frames_per_trigger = int(config_json.get("frames_per_trigger", 1))
 
@@ -437,8 +355,6 @@ def _apply_sync_config(
     sync_config.mode = _sync_mode_from_str(mode, OBMultiDeviceSyncMode)
     sync_config.color_delay_us = color_delay_us
     sync_config.depth_delay_us = depth_delay_us
-    if hasattr(sync_config, "trigger_to_image_delay_us"):
-        sync_config.trigger_to_image_delay_us = trigger_to_image_delay_us
     sync_config.trigger_out_enable = trigger_out_enable
     sync_config.trigger_out_delay_us = trigger_out_delay_us
     sync_config.frames_per_trigger = frames_per_trigger
@@ -450,7 +366,6 @@ def _apply_sync_config(
             f"(SN={serial or '-'}, index={index}, source={source}, mode={mode}, "
             f"trigger_out_enable={trigger_out_enable}, "
             f"color_delay_us={color_delay_us}, depth_delay_us={depth_delay_us}, "
-            f"trigger_to_image_delay_us={trigger_to_image_delay_us}, "
             f"trigger_out_delay_us={trigger_out_delay_us}, "
             f"frames_per_trigger={frames_per_trigger}): {exc}"
         ) from exc
@@ -459,7 +374,6 @@ def _apply_sync_config(
         "mode": mode,
         "color_delay_us": color_delay_us,
         "depth_delay_us": depth_delay_us,
-        "trigger_to_image_delay_us": trigger_to_image_delay_us,
         "trigger_out_enable": trigger_out_enable,
         "trigger_out_delay_us": trigger_out_delay_us,
         "frames_per_trigger": frames_per_trigger,
@@ -470,15 +384,8 @@ def _normalize_serial(value) -> str:
     return str(value or "").strip()
 
 
-def _serial_key(value) -> str:
-    return _normalize_serial(value).upper()
-
-
-def _uses_serial_config(config_entries: list[dict]) -> bool:
-    return any(
-        not _is_placeholder_serial(str(entry.get("serial", "")))
-        for entry in config_entries
-    )
+def _uses_strict_serial_config(config_by_serial: dict[str, dict]) -> bool:
+    return any(not _is_placeholder_serial(serial) for serial in config_by_serial)
 
 
 def _is_placeholder_serial(serial: str) -> bool:
@@ -486,40 +393,8 @@ def _is_placeholder_serial(serial: str) -> bool:
     return not serial or (serial.startswith("CAMERA_") and serial.endswith("_SERIAL"))
 
 
-def _placeholder_config_for_index(config_entries: list[dict], index: int) -> dict | None:
-    if index < 0 or index >= len(config_entries):
-        return None
-    entry = config_entries[index]
-    if not _is_placeholder_serial(str(entry.get("serial", ""))):
-        return None
-    config = entry.get("config", {})
-    return config if isinstance(config, dict) else None
-
-
-def _config_mode(config_json) -> str:
-    if not isinstance(config_json, dict):
-        return ""
-    return str(config_json.get("mode", "")).strip().upper()
-
-
-def _secondary_sync_config() -> dict:
-    return {
-        "mode": "SECONDARY",
-        "depth_delay_us": 0,
-        "color_delay_us": 0,
-        "trigger_to_image_delay_us": 0,
-        "trigger_out_enable": False,
-        "trigger_out_delay_us": 0,
-        "frames_per_trigger": 1,
-    }
-
-
-def _serials_text(config_entries: list[dict]) -> str:
-    serials = sorted(
-        str(entry.get("serial", ""))
-        for entry in config_entries
-        if not _is_placeholder_serial(str(entry.get("serial", "")))
-    )
+def _serials_text(config_by_serial: dict[str, dict]) -> str:
+    serials = sorted(config_by_serial)
     return ", ".join(serials) if serials else "-"
 
 
@@ -573,14 +448,6 @@ def _default_sync_config(index: int) -> dict:
         "trigger_out_delay_us": 0,
         "frames_per_trigger": 1,
     }
-
-
-def _default_trigger_out_enable(mode: str, index: int) -> bool:
-    return str(mode).strip().upper() == "PRIMARY" or index == 0 and not mode
-
-
-def _sync_mode_allows_trigger_out(mode: str) -> bool:
-    return str(mode).strip().upper() == "PRIMARY"
 
 
 def _encode_jpeg(image, cv2) -> bytes | None:
