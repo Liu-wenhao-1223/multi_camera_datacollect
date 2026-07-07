@@ -3,7 +3,7 @@ Type=Application
 Name=Multi Camera Data Collect
 Name[zh_CN]=多相机采集
 Comment=Launch Orbbec multi-camera data collection
-Exec=/home/workspace/multi_camera_datacollect/run_multi_camera_datacollect.sh
+Exec=/usr/bin/env python3 -c "from pathlib import Path; import subprocess; app=Path.home()/'workspace'/'multi_camera_datacollect'; subprocess.Popen([str(app/'run_multi_camera_datacollect.sh')], cwd=str(app))"
 Icon=camera-photo
 Terminal=false
 Categories=Utility;Science;
