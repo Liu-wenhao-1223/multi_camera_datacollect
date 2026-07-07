@@ -28,8 +28,6 @@ cd ~/workspace/multi_camera_datacollect
 Exec=... Path.home()/workspace/multi_camera_datacollect/run_multi_camera_datacollect.sh
 ```
 
-如果双击后没有反应，查看桌面上的 `multi_camera_datacollect_launch.log`，里面会记录实际查找的目录和启动错误。
-
 如果系统提示不信任该启动器，先右键选择允许启动，或执行：
 
 ```bash
