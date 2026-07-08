@@ -6,3 +6,6 @@ __pycache__/
 logs/
 Log/
 record/
+
+# Local camera sync config. Copy the example file on each machine.
+config/multi_device_sync_config.json

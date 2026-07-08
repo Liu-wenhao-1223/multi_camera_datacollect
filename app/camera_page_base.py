@@ -1759,7 +1759,12 @@ class CameraPageBase(Page):
         self.record_timestamp_checkbox = QCheckBox("加日期时间", card)
         self.record_timestamp_checkbox.setChecked(True)
         self.record_auto_stop_checkbox = QCheckBox("定时停止", card)
-        self.record_auto_stop_checkbox.setChecked(True)
+        self.record_auto_stop_checkbox.setChecked(False)
+        self.record_auto_stop_checkbox.setMinimumHeight(34)
+        self.record_auto_stop_checkbox.setStyleSheet(
+            "QCheckBox { spacing: 8px; padding: 2px 0; }"
+            "QCheckBox::indicator { width: 26px; height: 26px; }"
+        )
         self.record_auto_stop_checkbox.stateChanged.connect(self._on_auto_stop_recording_changed)
         self.record_duration_label = CaptionLabel("时长", card)
         self.record_duration_spinbox = QSpinBox(card)
@@ -1768,6 +1773,7 @@ class CameraPageBase(Page):
         self.record_duration_spinbox.setValue(120)
         self.record_duration_spinbox.setSuffix(" s")
         self.record_duration_spinbox.setMinimumWidth(84)
+        self.record_duration_spinbox.setEnabled(False)
         self.record_duration_controls = QWidget(card)
         self.record_duration_controls_layout = QHBoxLayout(self.record_duration_controls)
         self.record_duration_controls_layout.setContentsMargins(0, 0, 0, 0)

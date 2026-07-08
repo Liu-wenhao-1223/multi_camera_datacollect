@@ -1,7 +1,7 @@
 {
   "devices": [
     {
-      "serial_number": "CL89562000L",
+      "serial_number": "CAMERA_1_SERIAL",
       "config": {
         "mode": "PRIMARY",
         "depth_delay_us": 0,
@@ -13,7 +13,7 @@
       }
     },
     {
-      "serial_number": "CL8L56300XS",
+      "serial_number": "CAMERA_2_SERIAL",
       "config": {
         "mode": "SECONDARY",
         "depth_delay_us": 0,
