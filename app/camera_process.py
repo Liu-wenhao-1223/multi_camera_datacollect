@@ -8,6 +8,13 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from .disk_guard import (
+    DISK_CHECK_INTERVAL_SECONDS,
+    DiskAutoStopReached,
+    DiskGuardError,
+    ensure_recording_disk_available,
+)
+
 
 MIN_DEPTH_MM = 20
 MAX_DEPTH_MM = 5000
@@ -48,6 +55,8 @@ class SegmentedBagRecorder:
         self._segment_index = 1
         self._has_rotated = False
         self._segment_started_at: float | None = None
+        self._last_disk_check_at: float | None = None
+        self._soft_disk_stop_armed = True
 
     @property
     def active_path(self) -> Path | None:
@@ -61,6 +70,7 @@ class SegmentedBagRecorder:
         self._base_path = Path(base_path)
         self._segment_index = 1
         self._has_rotated = False
+        self._check_recording_disk(force=True, starting=True)
         self._start_segment(self._base_path)
         return self._base_path
 
@@ -82,6 +92,7 @@ class SegmentedBagRecorder:
     def rotate_if_due(self) -> Path | None:
         if self._recorder is None or self._base_path is None or self._active_path is None:
             return None
+        self._check_recording_disk()
         if self._segment_started_at is None:
             return None
         elapsed = time.monotonic() - self._segment_started_at
@@ -169,6 +180,28 @@ class SegmentedBagRecorder:
         self._segment_index = 1
         self._has_rotated = False
         self._segment_started_at = None
+        self._last_disk_check_at = None
+        self._soft_disk_stop_armed = True
+
+    def _check_recording_disk(self, *, force: bool = False, starting: bool = False) -> None:
+        path = self._active_path or self._base_path
+        if path is None:
+            return
+        now = time.monotonic()
+        if (
+            not force
+            and self._last_disk_check_at is not None
+            and now - self._last_disk_check_at < DISK_CHECK_INTERVAL_SECONDS
+        ):
+            return
+        usage = ensure_recording_disk_available(path.parent)
+        if starting:
+            self._soft_disk_stop_armed = not usage.auto_stop_reached
+        elif self._soft_disk_stop_armed and usage.auto_stop_reached:
+            raise DiskAutoStopReached(usage)
+        elif not usage.auto_stop_reached:
+            self._soft_disk_stop_armed = True
+        self._last_disk_check_at = now
 
     def _emit_status(self, message: str) -> None:
         if self._status_callback is not None:
@@ -296,6 +329,16 @@ def run_orbbec_camera_process(
                         f"Camera {device_index + 1}: saved {closed_path.name}; "
                         f"recording {active_path.name}",
                     )
+        except DiskGuardError as exc:
+            failed_recording = recording
+            recording = None
+            if failed_recording is not None:
+                try:
+                    failed_recording.close()
+                except Exception:
+                    pass
+            gc.collect()
+            emit("recording_error", str(exc))
         except Exception as exc:
             failed_recording = recording
             recording = None

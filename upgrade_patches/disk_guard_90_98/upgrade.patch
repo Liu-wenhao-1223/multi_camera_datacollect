@@ -1,0 +1,544 @@
+diff --git a/app/camera_page_base.py b/app/camera_page_base.py
+index d354279..7481e43 100644
+--- a/app/camera_page_base.py
++++ b/app/camera_page_base.py
+@@ -35,6 +35,14 @@ from qfluentwidgets import (
+     SubtitleLabel,
+ )
+ 
++from .disk_guard import (
++    DISK_CHECK_INTERVAL_SECONDS,
++    DiskGuardError,
++    disk_auto_stop_message,
++    disk_limit_message,
++    ensure_recording_disk_available,
++    get_recording_disk_usage,
++)
+ from .recording_settings import recording_output_dir, set_recording_output_dir
+ from .i18n import load_catalog, normalize_language
+ from .camera_process import run_orbbec_camera_process
+@@ -831,6 +839,8 @@ class CameraPanel(QWidget):
+         self.recording_base_dir = recording_output_dir()
+         self._recording = False
+         self._recording_pending = False
++        self._recording_block_reason = ""
++        self._sync_stream_running = False
+         self._recording_started_at: float | None = None
+         self._recording_elapsed_ms = 0
+         self._recording_segment_paths: list[Path] = []
+@@ -1108,6 +1118,30 @@ class CameraPanel(QWidget):
+     def set_recording_output_dir(self, path: Path) -> None:
+         self.recording_base_dir = Path(path).expanduser().resolve()
+ 
++    def set_recording_blocked(self, reason: str | None) -> None:
++        self._recording_block_reason = str(reason or "")
++        if self._recording_block_reason:
++            self.record_button.setEnabled(False)
++            if not self.is_recording_or_pending():
++                self.status_label.setText(self._recording_block_reason)
++            return
++        self.record_button.setEnabled(self._recording_button_available())
++
++    def _recording_button_available(self) -> bool:
++        stream_running = self.is_running() or self._sync_stream_running
++        return stream_running and not self._recording_pending
++
++    def _recording_disk_allows_start(self, path: Path) -> bool:
++        if self._recording_block_reason:
++            self.status_label.setText(self._recording_block_reason)
++            return False
++        try:
++            ensure_recording_disk_available(path)
++        except DiskGuardError as exc:
++            self.status_label.setText(str(exc))
++            return False
++        return True
++
+     def set_recording_mp4_conversion_enabled(self, enabled: bool) -> None:
+         self._convert_recording_to_mp4 = bool(enabled)
+ 
+@@ -1122,6 +1156,7 @@ class CameraPanel(QWidget):
+         self.record_button.setEnabled(False)
+ 
+     def set_sync_stream_started(self) -> None:
++        self._sync_stream_running = True
+         self._manual_stop_requested = False
+         self._last_start_error = None
+         self._remaining_start_retries = 0
+@@ -1129,9 +1164,10 @@ class CameraPanel(QWidget):
+         self.preview_timer.stop()
+         self.start_button.setEnabled(False)
+         self.stop_button.setEnabled(False)
+-        self.record_button.setEnabled(True)
++        self.record_button.setEnabled(not self._recording_block_reason)
+ 
+     def set_sync_stream_stopped(self) -> None:
++        self._sync_stream_running = False
+         self.preview_timer.stop()
+         self._last_pixmaps.clear()
+         self._set_preview_placeholder(self.color_preview)
+@@ -1167,7 +1203,7 @@ class CameraPanel(QWidget):
+         self._recording_started_at = time.monotonic()
+         self._recording_elapsed_ms = 0
+         self.record_button.setText("Stop Recording")
+-        self.record_button.setEnabled(True)
++        self.record_button.setEnabled(not self._recording_block_reason)
+         self.recording_timer.start()
+         self._update_recording_time()
+         self.status_label.setText(f"Recording RGB-D: {Path(path).parent}")
+@@ -1202,6 +1238,9 @@ class CameraPanel(QWidget):
+             self.stop_recording()
+             return
+ 
++        if not self._recording_disk_allows_start(self.recording_base_dir):
++            return
++
+         try:
+             session_dir = create_camera_recording_session_dir(
+                 self.recording_base_dir,
+@@ -1216,6 +1255,8 @@ class CameraPanel(QWidget):
+     def start_recording_to_bag(self, bag_path: Path) -> bool:
+         if self.worker is None or not self.worker.isRunning() or self._recording_pending or self._recording:
+             return False
++        if not self._recording_disk_allows_start(Path(bag_path).parent):
++            return False
+         self.stop_playback()
+         self._recording_pending = True
+         self.record_button.setEnabled(False)
+@@ -1236,7 +1277,7 @@ class CameraPanel(QWidget):
+         self._last_start_error = None
+         self._remaining_start_retries = 0
+         self.start_retry_timer.stop()
+-        self.record_button.setEnabled(True)
++        self.record_button.setEnabled(not self._recording_block_reason)
+         self.preview_timer.start()
+ 
+     def _on_stream_stopped(self) -> None:
+@@ -1385,7 +1426,7 @@ class CameraPanel(QWidget):
+         self._recording_started_at = time.monotonic()
+         self._recording_elapsed_ms = 0
+         self.record_button.setText("Stop Recording")
+-        self.record_button.setEnabled(True)
++        self.record_button.setEnabled(not self._recording_block_reason)
+         self.recording_timer.start()
+         self._update_recording_time()
+         self.status_label.setText(f"Recording RGB-D: {Path(path).parent}")
+@@ -1404,7 +1445,9 @@ class CameraPanel(QWidget):
+         self._recording_started_at = None
+         self.recording_timer.stop()
+         self.record_button.setText("Start Recording")
+-        self.record_button.setEnabled(self.worker is not None and self.worker.isRunning())
++        self.record_button.setEnabled(
++            self._recording_button_available() and not self._recording_block_reason
++        )
+         self.recording_time_label.setText(
+             f"Recorded: {self._format_elapsed(self._recording_elapsed_ms)}"
+         )
+@@ -1413,7 +1456,9 @@ class CameraPanel(QWidget):
+             if final_path not in self._recording_segment_paths:
+                 self._recording_segment_paths.append(final_path)
+             self.status_label.setText(f"RGB-D recording saved: {Path(path).parent}")
+-            if self._convert_recording_to_mp4:
++            if self._convert_recording_to_mp4 and self._recording_disk_allows_start(
++                final_path.parent
++            ):
+                 for bag_path in list(self._recording_segment_paths):
+                     self._start_mp4_conversions(bag_path)
+         self._recording_segment_paths = []
+@@ -1425,7 +1470,9 @@ class CameraPanel(QWidget):
+         self._recording_started_at = None
+         self.recording_timer.stop()
+         self.record_button.setText("Start Recording")
+-        self.record_button.setEnabled(self.worker is not None and self.worker.isRunning())
++        self.record_button.setEnabled(
++            self._recording_button_available() and not self._recording_block_reason
++        )
+         self.recording_time_label.setText("Recording: error")
+         self.status_label.setText(f"Recording error: {message}")
+ 
+@@ -1633,6 +1680,10 @@ class CameraPageBase(Page):
+         self._multi_camera_sync_enabled = bool(default_multi_camera_sync)
+         self._convert_recordings_to_mp4 = False
+         self._record_point_clouds_enabled = False
++        self._disk_recording_blocked = False
++        self._disk_recording_block_message = ""
++        self._disk_guard_stop_requested = False
++        self._disk_soft_stop_armed = True
+         self._sync_hardware_align_status: dict[int, tuple[bool, str]] = {}
+         self._multi_camera_sync_worker: MultiCameraSyncWorker | None = None
+         self._standalone_reset_worker: CameraStandaloneResetWorker | None = None
+@@ -1658,6 +1709,9 @@ class CameraPageBase(Page):
+         self.recording_auto_stop_timer = QTimer(self)
+         self.recording_auto_stop_timer.setSingleShot(True)
+         self.recording_auto_stop_timer.timeout.connect(self._auto_stop_all_recording)
++        self.disk_guard_timer = QTimer(self)
++        self.disk_guard_timer.setInterval(int(DISK_CHECK_INTERVAL_SECONDS * 1000))
++        self.disk_guard_timer.timeout.connect(self._check_recording_disk)
+ 
+         self.main_layout = QVBoxLayout(self)
+         self.main_layout.setContentsMargins(28, 24, 28, 24)
+@@ -1691,6 +1745,8 @@ class CameraPageBase(Page):
+         self.global_state_timer.start()
+         self._apply_sync_mode_to_panels()
+         self._set_mode_buttons(self._multi_camera_sync_enabled)
++        self._check_recording_disk()
++        self.disk_guard_timer.start()
+         self._refresh_global_controls()
+ 
+     def _build_header_card(self) -> CardWidget:
+@@ -2424,6 +2480,85 @@ class CameraPageBase(Page):
+         self.global_status_label.setText("录制时长已到，正在自动停止录制...")
+         self._stop_all_recording()
+ 
++    def _recording_disk_allows_start(self) -> bool:
++        self._check_recording_disk()
++        if self._disk_recording_blocked:
++            self.global_status_label.setText(self._disk_recording_block_message)
++            return False
++        return True
++
++    def _check_recording_disk(self) -> bool:
++        if not self.camera_panels:
++            return False
++        output_dir = self.camera_panels[0].recording_base_dir
++        try:
++            usage = get_recording_disk_usage(output_dir)
++        except Exception as exc:
++            message = f"无法检查录制磁盘占用，已暂停录制以保护磁盘: {exc}"
++            self._apply_recording_disk_block(True, message)
++            return False
++
++        if usage.start_block_reached:
++            self._disk_soft_stop_armed = False
++            self._apply_recording_disk_block(True, disk_limit_message(usage))
++            return False
++
++        was_blocked = self._disk_recording_blocked
++        self._apply_recording_disk_block(False, "")
++        any_recording = self.is_any_recording_or_pending()
++        if usage.auto_stop_reached:
++            if (
++                any_recording
++                and self._disk_soft_stop_armed
++                and not self._disk_guard_stop_requested
++            ):
++                self._disk_soft_stop_armed = False
++                self._disk_guard_stop_requested = True
++                message = disk_auto_stop_message(usage)
++                self._stop_all_recording()
++                self.global_status_label.setText(message)
++            elif not any_recording:
++                self._disk_soft_stop_armed = False
++                self._disk_guard_stop_requested = False
++                if was_blocked:
++                    self.global_status_label.setText(
++                        f"磁盘占用已降至 {usage.percent_used:.1f}%，处于 90%–98% 缓冲区，"
++                        "可手动继续录制。"
++                    )
++            return True
++
++        was_soft_stop_disarmed = not self._disk_soft_stop_armed
++        self._disk_soft_stop_armed = True
++        if was_blocked or was_soft_stop_disarmed:
++            self.global_status_label.setText(
++                f"磁盘占用已恢复至 {usage.percent_used:.1f}%，"
++                "90% 自动暂停已重新启用。"
++            )
++        return True
++
++    def _apply_recording_disk_block(self, blocked: bool, message: str) -> None:
++        blocked = bool(blocked)
++        state_changed = blocked != self._disk_recording_blocked
++        self._disk_recording_blocked = blocked
++        self._disk_recording_block_message = str(message or "")
++        any_recording = self.is_any_recording_or_pending()
++        if not any_recording:
++            self._disk_guard_stop_requested = False
++
++        for panel in self.camera_panels:
++            panel.set_recording_blocked(
++                self._disk_recording_block_message if blocked else None
++            )
++
++        if blocked and any_recording and not self._disk_guard_stop_requested:
++            self._disk_guard_stop_requested = True
++            self._stop_all_recording()
++
++        if blocked:
++            self.global_status_label.setText(self._disk_recording_block_message)
++        if state_changed:
++            self._refresh_global_controls()
++
+     def _capture_all_recording_elapsed(self) -> None:
+         if self._all_recording_started_at is not None:
+             self._all_recording_elapsed_ms = int(
+@@ -2465,6 +2600,9 @@ class CameraPageBase(Page):
+         self._refresh_global_controls()
+ 
+     def start_all_recording_to_dir(self, session_dir: Path) -> int:
++        if not self._recording_disk_allows_start():
++            self._refresh_global_controls()
++            return 0
+         if self._multi_camera_sync_worker is not None and self._multi_camera_sync_worker.isRunning():
+             return self._start_sync_recording_to_dir(session_dir)
+         running_panels = [panel for panel in self.camera_panels if panel.is_running()]
+@@ -2557,6 +2695,8 @@ class CameraPageBase(Page):
+         return any(panel.is_recording_or_pending() for panel in self.camera_panels)
+ 
+     def _start_all_recording(self) -> None:
++        if not self._recording_disk_allows_start():
++            return
+         try:
+             session_dir = create_camera_recording_session_dir(
+                 self.camera_panels[0].recording_base_dir,
+@@ -2627,7 +2767,11 @@ class CameraPageBase(Page):
+             self._tr("camera.record_all_stop") if any_recording else self._tr("camera.record_all_start")
+         )
+         record_ready = standalone_running or sync_ready
+-        self.record_all_button.setEnabled(record_ready and not self._connect_sequence_active)
++        self.record_all_button.setEnabled(
++            record_ready
++            and not self._connect_sequence_active
++            and (any_recording or not self._disk_recording_blocked)
++        )
+         self._set_record_all_button_recording(any_recording)
+         self.load_record_button.setEnabled(not any_recording)
+         if self.convert_mp4_checkbox is not None:
+@@ -2646,6 +2790,7 @@ class CameraPageBase(Page):
+         self.connect_sequence_timer.stop()
+         self.sync_preview_timer.stop()
+         self.recording_auto_stop_timer.stop()
++        self.disk_guard_timer.stop()
+         self._connect_pending_panels.clear()
+         self._connect_sequence_active = False
+         stopped = True
+@@ -2671,6 +2816,7 @@ class CameraPageBase(Page):
+         for panel in self.camera_panels:
+             panel.set_recording_output_dir(path)
+         self._refresh_recording_output_label()
++        self._check_recording_disk()
+ 
+     def _refresh_recording_output_label(self) -> None:
+         if self.output_dir_label is None or not self.camera_panels:
+diff --git a/app/camera_process.py b/app/camera_process.py
+index 35c851f..3112680 100644
+--- a/app/camera_process.py
++++ b/app/camera_process.py
+@@ -8,6 +8,13 @@ import time
+ from datetime import datetime
+ from pathlib import Path
+ 
++from .disk_guard import (
++    DISK_CHECK_INTERVAL_SECONDS,
++    DiskAutoStopReached,
++    DiskGuardError,
++    ensure_recording_disk_available,
++)
++
+ 
+ MIN_DEPTH_MM = 20
+ MAX_DEPTH_MM = 5000
+@@ -48,6 +55,8 @@ class SegmentedBagRecorder:
+         self._segment_index = 1
+         self._has_rotated = False
+         self._segment_started_at: float | None = None
++        self._last_disk_check_at: float | None = None
++        self._soft_disk_stop_armed = True
+ 
+     @property
+     def active_path(self) -> Path | None:
+@@ -61,6 +70,7 @@ class SegmentedBagRecorder:
+         self._base_path = Path(base_path)
+         self._segment_index = 1
+         self._has_rotated = False
++        self._check_recording_disk(force=True, starting=True)
+         self._start_segment(self._base_path)
+         return self._base_path
+ 
+@@ -82,6 +92,7 @@ class SegmentedBagRecorder:
+     def rotate_if_due(self) -> Path | None:
+         if self._recorder is None or self._base_path is None or self._active_path is None:
+             return None
++        self._check_recording_disk()
+         if self._segment_started_at is None:
+             return None
+         elapsed = time.monotonic() - self._segment_started_at
+@@ -169,6 +180,28 @@ class SegmentedBagRecorder:
+         self._segment_index = 1
+         self._has_rotated = False
+         self._segment_started_at = None
++        self._last_disk_check_at = None
++        self._soft_disk_stop_armed = True
++
++    def _check_recording_disk(self, *, force: bool = False, starting: bool = False) -> None:
++        path = self._active_path or self._base_path
++        if path is None:
++            return
++        now = time.monotonic()
++        if (
++            not force
++            and self._last_disk_check_at is not None
++            and now - self._last_disk_check_at < DISK_CHECK_INTERVAL_SECONDS
++        ):
++            return
++        usage = ensure_recording_disk_available(path.parent)
++        if starting:
++            self._soft_disk_stop_armed = not usage.auto_stop_reached
++        elif self._soft_disk_stop_armed and usage.auto_stop_reached:
++            raise DiskAutoStopReached(usage)
++        elif not usage.auto_stop_reached:
++            self._soft_disk_stop_armed = True
++        self._last_disk_check_at = now
+ 
+     def _emit_status(self, message: str) -> None:
+         if self._status_callback is not None:
+@@ -296,6 +329,16 @@ def run_orbbec_camera_process(
+                         f"Camera {device_index + 1}: saved {closed_path.name}; "
+                         f"recording {active_path.name}",
+                     )
++        except DiskGuardError as exc:
++            failed_recording = recording
++            recording = None
++            if failed_recording is not None:
++                try:
++                    failed_recording.close()
++                except Exception:
++                    pass
++            gc.collect()
++            emit("recording_error", str(exc))
+         except Exception as exc:
+             failed_recording = recording
+             recording = None
+diff --git a/app/disk_guard.py b/app/disk_guard.py
+new file mode 100644
+index 0000000..317edf3
+--- /dev/null
++++ b/app/disk_guard.py
+@@ -0,0 +1,98 @@
++from __future__ import annotations
++
++import shutil
++from dataclasses import dataclass
++from pathlib import Path
++
++
++DISK_AUTO_STOP_PERCENT = 90.0
++DISK_START_BLOCK_PERCENT = 98.0
++DISK_CHECK_INTERVAL_SECONDS = 0.25
++
++
++@dataclass(frozen=True)
++class RecordingDiskUsage:
++    path: Path
++    total_bytes: int
++    used_bytes: int
++    free_bytes: int
++    percent_used: float
++
++    @property
++    def auto_stop_reached(self) -> bool:
++        return self.percent_used >= DISK_AUTO_STOP_PERCENT
++
++    @property
++    def start_block_reached(self) -> bool:
++        return self.percent_used >= DISK_START_BLOCK_PERCENT
++
++
++class DiskGuardError(RuntimeError):
++    """Base error for fail-safe recording disk checks."""
++
++
++class DiskUsageLimitExceeded(DiskGuardError):
++    def __init__(self, usage: RecordingDiskUsage):
++        self.usage = usage
++        super().__init__(disk_limit_message(usage))
++
++
++class DiskAutoStopReached(DiskGuardError):
++    def __init__(self, usage: RecordingDiskUsage):
++        self.usage = usage
++        super().__init__(disk_auto_stop_message(usage))
++
++
++class DiskUsageCheckFailed(DiskGuardError):
++    pass
++
++
++def get_recording_disk_usage(path: str | Path) -> RecordingDiskUsage:
++    target = _nearest_existing_path(Path(path).expanduser())
++    total, used, free = shutil.disk_usage(target)
++    if total <= 0:
++        raise OSError(f"磁盘总容量无效: {target}")
++    return RecordingDiskUsage(
++        path=target,
++        total_bytes=int(total),
++        used_bytes=int(used),
++        free_bytes=int(free),
++        percent_used=float(used) * 100.0 / float(total),
++    )
++
++
++def ensure_recording_disk_available(path: str | Path) -> RecordingDiskUsage:
++    try:
++        usage = get_recording_disk_usage(path)
++    except OSError as exc:
++        message = f"无法检查录制磁盘占用，已停止录制: {exc}"
++        raise DiskUsageCheckFailed(message) from exc
++    if usage.start_block_reached:
++        raise DiskUsageLimitExceeded(usage)
++    return usage
++
++
++def disk_limit_message(usage: RecordingDiskUsage) -> str:
++    return (
++        f"磁盘占用已达 {usage.percent_used:.1f}%"
++        f"（硬上限 {DISK_START_BLOCK_PERCENT:.0f}%），"
++        "录制已停止，并禁止继续录制，以防磁盘写满。"
++    )
++
++
++def disk_auto_stop_message(usage: RecordingDiskUsage) -> str:
++    return (
++        f"磁盘占用已达 {usage.percent_used:.1f}%"
++        f"（自动暂停线 {DISK_AUTO_STOP_PERCENT:.0f}%），录制已自动暂停；"
++        f"{DISK_START_BLOCK_PERCENT:.0f}% 前可手动继续录制。"
++    )
++
++
++def _nearest_existing_path(path: Path) -> Path:
++    candidate = path.resolve(strict=False)
++    while not candidate.exists():
++        parent = candidate.parent
++        if parent == candidate:
++            raise OSError(f"找不到可检查的录制磁盘路径: {path}")
++        candidate = parent
++    return candidate
+diff --git a/app/multi_camera_sync_process.py b/app/multi_camera_sync_process.py
+index d27d97e..b39651d 100644
+--- a/app/multi_camera_sync_process.py
++++ b/app/multi_camera_sync_process.py
+@@ -6,6 +6,8 @@ import queue
+ import time
+ from pathlib import Path
+ 
++from app.disk_guard import DiskGuardError
++
+ 
+ DEFAULT_SYNC_CONFIG_PATH = Path(__file__).resolve().parents[1] / "config" / "multi_device_sync_config.json"
+ MAX_SYNC_CAMERAS = 3
+@@ -127,6 +129,15 @@ def run_orbbec_multi_camera_sync_process(
+                             f"Camera {index + 1}: saved {closed_path.name}; "
+                             f"recording {active_path.name}",
+                         )
++            except DiskGuardError as exc:
++                failed_recording = recordings.pop(index, None)
++                if failed_recording is not None:
++                    try:
++                        failed_recording.close()
++                    except Exception:
++                        pass
++                gc.collect()
++                emit("recording_error", index, str(exc))
+             except Exception as exc:
+                 failed_recording = recordings.pop(index, None)
+                 if failed_recording is not None:
