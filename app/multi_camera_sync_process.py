@@ -6,6 +6,8 @@ import queue
 import time
 from pathlib import Path
 
+from app.disk_guard import DiskGuardError
+
 
 DEFAULT_SYNC_CONFIG_PATH = Path(__file__).resolve().parents[1] / "config" / "multi_device_sync_config.json"
 MAX_SYNC_CAMERAS = 3
@@ -127,6 +129,15 @@ def run_orbbec_multi_camera_sync_process(
                             f"Camera {index + 1}: saved {closed_path.name}; "
                             f"recording {active_path.name}",
                         )
+            except DiskGuardError as exc:
+                failed_recording = recordings.pop(index, None)
+                if failed_recording is not None:
+                    try:
+                        failed_recording.close()
+                    except Exception:
+                        pass
+                gc.collect()
+                emit("recording_error", index, str(exc))
             except Exception as exc:
                 failed_recording = recordings.pop(index, None)
                 if failed_recording is not None:

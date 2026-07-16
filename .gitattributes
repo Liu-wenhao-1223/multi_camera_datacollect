@@ -1,0 +1,1 @@
+upgrade_patches/**/*.patch -whitespace linguist-generated=true
